@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../../api/client';
 import { ticketsApi } from '../../../api/tickets';
 import type { PagedResult, TicketFilters, TicketListItem } from '../../../types/api';
@@ -29,25 +29,34 @@ interface State {
 export function useTicketList() {
   const [filters, setFilters] = useState<TicketFilters>(emptyFilters);
   const [state, setState] = useState<State>({ isLoading: true });
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
 
-  const load = async () => {
+  const prevSearchRef = useRef(filters.search);
+
+  const load = useCallback(async (targetFilters?: TicketFilters) => {
     setState((current) => ({ ...current, isLoading: true, error: undefined }));
 
     try {
-      const data = await ticketsApi.getTickets(filters);
+      const data = await ticketsApi.getTickets(targetFilters ?? filtersRef.current);
       setState({ isLoading: false, data, error: undefined });
     } catch (error) {
       const message = error instanceof ApiError ? error.message : 'Unable to load tickets.';
       setState((current) => ({ ...current, isLoading: false, error: message }));
     }
-  };
+  }, []);
 
   useEffect(() => {
-    const handle = window.setTimeout(load, DEBOUNCE_MS);
+    const isSearchChange = prevSearchRef.current !== filters.search;
+    prevSearchRef.current = filters.search;
 
-    return () => window.clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- filters object identity changes every render
-  }, [filters.search, filters.page, filters.pageSize]);
+    if (isSearchChange) {
+      const handle = window.setTimeout(() => void load(filters), DEBOUNCE_MS);
+      return () => window.clearTimeout(handle);
+    }
+
+    void load(filters);
+  }, [filters, load]);
 
   const updateFilters = (patch: Partial<TicketFilters>) =>
     setFilters((current) => ({ ...current, ...patch, page: patch.page ?? 1 }));
