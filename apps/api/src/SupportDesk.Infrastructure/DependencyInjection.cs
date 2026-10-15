@@ -44,6 +44,7 @@ public static class DependencyInjection
         services.AddSingleton<ITicketFilter, AssignedAgentTicketFilter>();
         services.AddSingleton<ITicketFilter, UnassignedOnlyTicketFilter>();
         services.AddSingleton<ITicketFilter, SearchTicketFilter>();
+        services.AddSingleton<ITicketFilter, SlaStatusTicketFilter>();
 
         services.AddScoped<ITicketQueries, TicketQueries>();
         services.AddScoped<ICustomerQueries, CustomerQueries>();

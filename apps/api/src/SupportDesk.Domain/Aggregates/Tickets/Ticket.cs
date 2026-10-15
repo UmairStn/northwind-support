@@ -111,4 +111,62 @@ public sealed class Ticket : AggregateRoot
         AssignedAgentId = agentId;
         UpdatedAtUtc = nowUtc;
     }
+
+    /// <summary>
+    /// Updates the response deadline for this ticket.
+    /// </summary>
+    public void SetDueAt(DateTime? dueAtUtc, DateTime nowUtc)
+    {
+        DueAtUtc = dueAtUtc;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>
+    /// Applies initial automated triage decisions (priority, due date, assigned agent).
+    /// </summary>
+    public void ApplyTriage(TicketPriority priority, DateTime? dueAtUtc, int? agentId, DateTime nowUtc)
+    {
+        Priority = priority;
+        DueAtUtc = dueAtUtc;
+        AssignedAgentId = agentId;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>
+    /// Checks whether the ticket can be escalated. Returns true if allowed; false with a reason otherwise.
+    /// </summary>
+    public bool CanEscalate(out string? rejectionReason)
+    {
+        if (Priority == TicketPriority.Critical)
+        {
+            rejectionReason = "Ticket is already at Critical priority and cannot be escalated.";
+            return false;
+        }
+
+        if (Status is TicketStatus.Resolved or TicketStatus.Closed)
+        {
+            rejectionReason = $"Ticket is {Status} and cannot be escalated.";
+            return false;
+        }
+
+        rejectionReason = null;
+        return true;
+    }
+
+    /// <summary>
+    /// Escalates the ticket to a new priority level, recomputing its due date and assignee.
+    /// </summary>
+    /// <exception cref="BusinessRuleViolationException">Ticket is already Critical, or is Resolved/Closed.</exception>
+    public void Escalate(TicketPriority newPriority, DateTime newDueAtUtc, int? newAgentId, DateTime nowUtc)
+    {
+        if (!CanEscalate(out var rejectionReason))
+        {
+            throw new BusinessRuleViolationException(rejectionReason!);
+        }
+
+        Priority = newPriority;
+        DueAtUtc = newDueAtUtc;
+        AssignedAgentId = newAgentId;
+        UpdatedAtUtc = nowUtc;
+    }
 }

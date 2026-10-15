@@ -14,6 +14,7 @@ public sealed class TicketBuilder
     private TicketStatus _status = TicketStatus.New;
     private int? _assignedAgentId;
     private DateTime? _resolvedAtUtc;
+    private DateTime? _dueAtUtc;
 
     public TicketBuilder WithReference(string reference)
     {
@@ -30,6 +31,12 @@ public sealed class TicketBuilder
     public TicketBuilder WithStatus(TicketStatus status)
     {
         _status = status;
+        return this;
+    }
+
+    public TicketBuilder WithDueAt(DateTime? dueAtUtc)
+    {
+        _dueAtUtc = dueAtUtc;
         return this;
     }
 
@@ -56,6 +63,11 @@ public sealed class TicketBuilder
             categoryId: 1,
             _priority,
             FixedClock.DefaultNow);
+
+        if (_dueAtUtc is not null)
+        {
+            ticket.SetDueAt(_dueAtUtc, FixedClock.DefaultNow);
+        }
 
         if (_assignedAgentId is not null)
         {

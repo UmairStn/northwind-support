@@ -10,6 +10,8 @@ namespace SupportDesk.Infrastructure.Data;
 /// </summary>
 public class SupportDbContext(DbContextOptions<SupportDbContext> options) : DbContext(options), IUnitOfWork
 {
+    public DbSet<SupportDesk.Domain.Aggregates.Tickets.TicketEscalation> TicketEscalations => Set<SupportDesk.Domain.Aggregates.Tickets.TicketEscalation>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(SupportDbContext).Assembly);

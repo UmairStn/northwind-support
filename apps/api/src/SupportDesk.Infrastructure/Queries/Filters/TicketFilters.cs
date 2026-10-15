@@ -1,4 +1,7 @@
+using Microsoft.EntityFrameworkCore;
+using SupportDesk.Application.Abstractions;
 using SupportDesk.Application.Contracts.Tickets;
+using SupportDesk.Domain.Aggregates.Tickets;
 
 namespace SupportDesk.Infrastructure.Queries.Filters;
 
@@ -76,6 +79,74 @@ public sealed class SearchTicketFilter : ITicketFilter
 }
 
 /// <summary>
+/// Filters tickets in SQL Server by their dynamically evaluated SLA status before count and paging.
+/// </summary>
+public sealed class SlaStatusTicketFilter(IClock clock) : ITicketFilter
+{
+    public IQueryable<TicketWithLabels> Apply(IQueryable<TicketWithLabels> source, TicketQuery query)
+    {
+        if (!query.SlaStatus.HasValue)
+        {
+            return source;
+        }
+
+        var now = clock.UtcNow;
+        var isInMemory = !source.Provider.GetType().FullName!.StartsWith("Microsoft.EntityFrameworkCore");
+
+        if (isInMemory)
+        {
+            return query.SlaStatus.Value switch
+            {
+                SlaStatus.NotApplicable => source.Where(x => x.Ticket.DueAtUtc == null),
+                SlaStatus.Met => source.Where(x =>
+                    x.Ticket.DueAtUtc != null &&
+                    (x.Ticket.Status == TicketStatus.Resolved || x.Ticket.Status == TicketStatus.Closed) &&
+                    x.Ticket.ResolvedAtUtc <= x.Ticket.DueAtUtc),
+                SlaStatus.Breached => source.Where(x =>
+                    x.Ticket.DueAtUtc != null &&
+                    (((x.Ticket.Status == TicketStatus.Resolved || x.Ticket.Status == TicketStatus.Closed) && x.Ticket.ResolvedAtUtc > x.Ticket.DueAtUtc) ||
+                     (x.Ticket.Status != TicketStatus.Resolved && x.Ticket.Status != TicketStatus.Closed && now > x.Ticket.DueAtUtc))),
+                SlaStatus.AtRisk => source.Where(x =>
+                    x.Ticket.DueAtUtc != null &&
+                    x.Ticket.Status != TicketStatus.Resolved && x.Ticket.Status != TicketStatus.Closed &&
+                    now <= x.Ticket.DueAtUtc &&
+                    (x.Ticket.DueAtUtc.Value - now).TotalSeconds * 4 <= (x.Ticket.DueAtUtc.Value - x.Ticket.CreatedAtUtc).TotalSeconds),
+                SlaStatus.WithinSla => source.Where(x =>
+                    x.Ticket.DueAtUtc != null &&
+                    x.Ticket.Status != TicketStatus.Resolved && x.Ticket.Status != TicketStatus.Closed &&
+                    now <= x.Ticket.DueAtUtc &&
+                    (x.Ticket.DueAtUtc.Value - now).TotalSeconds * 4 > (x.Ticket.DueAtUtc.Value - x.Ticket.CreatedAtUtc).TotalSeconds),
+                _ => source
+            };
+        }
+
+        return query.SlaStatus.Value switch
+        {
+            SlaStatus.NotApplicable => source.Where(x => x.Ticket.DueAtUtc == null),
+            SlaStatus.Met => source.Where(x =>
+                x.Ticket.DueAtUtc != null &&
+                (x.Ticket.Status == TicketStatus.Resolved || x.Ticket.Status == TicketStatus.Closed) &&
+                x.Ticket.ResolvedAtUtc <= x.Ticket.DueAtUtc),
+            SlaStatus.Breached => source.Where(x =>
+                x.Ticket.DueAtUtc != null &&
+                (((x.Ticket.Status == TicketStatus.Resolved || x.Ticket.Status == TicketStatus.Closed) && x.Ticket.ResolvedAtUtc > x.Ticket.DueAtUtc) ||
+                 (x.Ticket.Status != TicketStatus.Resolved && x.Ticket.Status != TicketStatus.Closed && now > x.Ticket.DueAtUtc))),
+            SlaStatus.AtRisk => source.Where(x =>
+                x.Ticket.DueAtUtc != null &&
+                x.Ticket.Status != TicketStatus.Resolved && x.Ticket.Status != TicketStatus.Closed &&
+                now <= x.Ticket.DueAtUtc &&
+                EF.Functions.DateDiffMinute(now, x.Ticket.DueAtUtc.Value) * 4 <= EF.Functions.DateDiffMinute(x.Ticket.CreatedAtUtc, x.Ticket.DueAtUtc.Value)),
+            SlaStatus.WithinSla => source.Where(x =>
+                x.Ticket.DueAtUtc != null &&
+                x.Ticket.Status != TicketStatus.Resolved && x.Ticket.Status != TicketStatus.Closed &&
+                now <= x.Ticket.DueAtUtc &&
+                EF.Functions.DateDiffMinute(now, x.Ticket.DueAtUtc.Value) * 4 > EF.Functions.DateDiffMinute(x.Ticket.CreatedAtUtc, x.Ticket.DueAtUtc.Value)),
+            _ => source
+        };
+    }
+}
+
+/// <summary>
 /// Executes the composite chain of filters against a ticket query.
 /// </summary>
 public static class TicketFilterPipeline
@@ -91,12 +162,28 @@ public static class TicketFilterPipeline
         new SearchTicketFilter()
     ];
 
+    public static IReadOnlyList<ITicketFilter> GetDefaultFilters(IClock clock) =>
+    [
+        new StatusTicketFilter(),
+        new PriorityTicketFilter(),
+        new CategoryTicketFilter(),
+        new CustomerTicketFilter(),
+        new AssignedAgentTicketFilter(),
+        new UnassignedOnlyTicketFilter(),
+        new SearchTicketFilter(),
+        new SlaStatusTicketFilter(clock)
+    ];
+
+    public static IQueryable<TicketWithLabels> ApplyAll(
+        IQueryable<TicketWithLabels> source,
+        TicketQuery query) =>
+        ApplyAll(source, query, DefaultFilters);
+
     public static IQueryable<TicketWithLabels> ApplyAll(
         IQueryable<TicketWithLabels> source,
         TicketQuery query,
-        IEnumerable<ITicketFilter>? filters = null)
+        IEnumerable<ITicketFilter> filters)
     {
-        var activeFilters = filters ?? DefaultFilters;
-        return activeFilters.Aggregate(source, (current, filter) => filter.Apply(current, query));
+        return filters.Aggregate(source, (current, filter) => filter.Apply(current, query));
     }
 }

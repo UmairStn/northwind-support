@@ -99,4 +99,74 @@ public class TicketTests
         Assert.Null(ticket.AssignedAgentId);
         Assert.Equal(Later, ticket.UpdatedAtUtc);
     }
+
+    [Fact]
+    public void CanEscalate_ReturnsTrue_WhenTicketIsEligible()
+    {
+        var ticket = new TicketBuilder().WithPriority(TicketPriority.Medium).WithStatus(TicketStatus.Open).Build();
+
+        var canEscalate = ticket.CanEscalate(out var rejectionReason);
+
+        Assert.True(canEscalate);
+        Assert.Null(rejectionReason);
+    }
+
+    [Fact]
+    public void CanEscalate_ReturnsFalse_WhenTicketIsCritical()
+    {
+        var ticket = new TicketBuilder().WithPriority(TicketPriority.Critical).Build();
+
+        var canEscalate = ticket.CanEscalate(out var rejectionReason);
+
+        Assert.False(canEscalate);
+        Assert.Contains("Critical", rejectionReason);
+    }
+
+    [Theory]
+    [InlineData(TicketStatus.Resolved)]
+    [InlineData(TicketStatus.Closed)]
+    public void CanEscalate_ReturnsFalse_WhenTicketIsResolvedOrClosed(TicketStatus status)
+    {
+        var ticket = new TicketBuilder().WithPriority(TicketPriority.High).WithStatus(status).Build();
+
+        var canEscalate = ticket.CanEscalate(out var rejectionReason);
+
+        Assert.False(canEscalate);
+        Assert.Contains(status.ToString(), rejectionReason);
+    }
+
+    [Fact]
+    public void Escalate_UpdatesPriorityDueAtAndAssignee()
+    {
+        var ticket = new TicketBuilder()
+            .WithPriority(TicketPriority.Medium)
+            .AssignedTo(1)
+            .Build();
+
+        var newDue = FixedClock.DefaultNow.AddHours(4);
+        ticket.Escalate(TicketPriority.High, newDue, 2, Later);
+
+        Assert.Equal(TicketPriority.High, ticket.Priority);
+        Assert.Equal(newDue, ticket.DueAtUtc);
+        Assert.Equal(2, ticket.AssignedAgentId);
+        Assert.Equal(Later, ticket.UpdatedAtUtc);
+    }
+
+    [Fact]
+    public void Escalate_WhenCritical_ThrowsBusinessRuleViolationException()
+    {
+        var ticket = new TicketBuilder().WithPriority(TicketPriority.Critical).Build();
+
+        Assert.Throws<BusinessRuleViolationException>(
+            () => ticket.Escalate(TicketPriority.Critical, Later, 1, Later));
+    }
+
+    [Fact]
+    public void Escalate_WhenResolvedOrClosed_ThrowsBusinessRuleViolationException()
+    {
+        var ticket = new TicketBuilder().WithStatus(TicketStatus.Resolved).Build();
+
+        Assert.Throws<BusinessRuleViolationException>(
+            () => ticket.Escalate(TicketPriority.High, Later, 1, Later));
+    }
 }

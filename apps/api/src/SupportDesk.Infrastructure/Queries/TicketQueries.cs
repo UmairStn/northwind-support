@@ -21,7 +21,7 @@ public sealed class TicketQueries(
     IEnumerable<ITicketFilter>? filters = null) : ITicketQueries
 {
     private readonly IReadOnlyList<ITicketFilter> _filters =
-        filters?.Any() == true ? filters.ToList() : TicketFilterPipeline.DefaultFilters;
+        filters?.Any() == true ? filters.ToList() : TicketFilterPipeline.GetDefaultFilters(clock);
 
     public async Task<PagedResult<TicketListItemDto>> GetPagedAsync(TicketQuery query, CancellationToken ct)
     {
@@ -48,7 +48,7 @@ public sealed class TicketQueries(
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.CreatedAtUtc, now)
             })
             .ToListAsync(ct);
 
@@ -77,7 +77,7 @@ public sealed class TicketQueries(
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.CreatedAtUtc, now)
             })
             .FirstOrDefaultAsync(ct);
     }
@@ -104,10 +104,34 @@ public sealed class TicketQueries(
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.CreatedAtUtc, now)
             })
             .ToListAsync(ct);
     }
+
+    public async Task<IReadOnlyList<TicketEscalationDto>> GetEscalationsAsync(int ticketId, CancellationToken ct) =>
+        await (from e in db.Set<TicketEscalation>().AsNoTracking()
+               where e.TicketId == ticketId
+               join fromAgent in db.Set<Agent>().AsNoTracking() on e.FromAgentId equals fromAgent.Id into fromAgents
+               from fa in fromAgents.DefaultIfEmpty()
+               join toAgent in db.Set<Agent>().AsNoTracking() on e.ToAgentId equals toAgent.Id into toAgents
+               from ta in toAgents.DefaultIfEmpty()
+               orderby e.EscalatedAtUtc descending, e.Id descending
+               select new TicketEscalationDto(
+                   e.Id,
+                   e.TicketId,
+                   e.FromPriority,
+                   e.ToPriority,
+                   e.FromAgentId,
+                   fa == null ? null : fa.FullName,
+                   e.ToAgentId,
+                   ta == null ? null : ta.FullName,
+                   e.FromDueAtUtc,
+                   e.ToDueAtUtc,
+                   e.Reason,
+                   e.EscalatedBy,
+                   e.EscalatedAtUtc))
+            .ToListAsync(ct);
 
     /// <summary>
     /// Every ticket with the rows that label it. Filter and sort this, then project.
