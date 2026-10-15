@@ -7,6 +7,7 @@ using SupportDesk.Domain.Aggregates.Categories;
 using SupportDesk.Domain.Aggregates.Customers;
 using SupportDesk.Domain.Aggregates.Tickets;
 using SupportDesk.Infrastructure.Data;
+using SupportDesk.Infrastructure.Queries.Filters;
 
 namespace SupportDesk.Infrastructure.Queries;
 
@@ -14,16 +15,17 @@ namespace SupportDesk.Infrastructure.Queries;
 /// Ticket reads. Projected in the database and never tracked. Aggregates hold only each
 /// other's ids, so the customer, category and agent labels are joined in here, on the read side.
 /// </summary>
-public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQueries
+public sealed class TicketQueries(
+    SupportDbContext db,
+    IClock clock,
+    IEnumerable<ITicketFilter>? filters = null) : ITicketQueries
 {
-    /// <remarks>
-    /// Sorts and pages every ticket. The filter values bound into <paramref name="query"/>
-    /// (search, status, priority, category, customer, agent, unassigned-only) are not applied
-    /// yet: server-side filtering is still to be built.
-    /// </remarks>
+    private readonly IReadOnlyList<ITicketFilter> _filters =
+        filters?.Any() == true ? filters.ToList() : TicketFilterPipeline.DefaultFilters;
+
     public async Task<PagedResult<TicketListItemDto>> GetPagedAsync(TicketQuery query, CancellationToken ct)
     {
-        var tickets = ApplyFilters(TicketsWithLabels(), query);
+        var tickets = TicketFilterPipeline.ApplyAll(TicketsWithLabels(), query, _filters);
 
         var totalCount = await tickets.CountAsync(ct);
 
@@ -117,50 +119,6 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
         from agent in db.Set<Agent>().Where(a => a.Id == ticket.AssignedAgentId).DefaultIfEmpty()
         select new TicketWithLabels { Ticket = ticket, Customer = customer, Category = category, Agent = agent };
 
-    private static IQueryable<TicketWithLabels> ApplyFilters(IQueryable<TicketWithLabels> source, TicketQuery query)
-    {
-        if (query.Status.HasValue)
-        {
-            source = source.Where(x => x.Ticket.Status == query.Status.Value);
-        }
-
-        if (query.Priority.HasValue)
-        {
-            source = source.Where(x => x.Ticket.Priority == query.Priority.Value);
-        }
-
-        if (query.CategoryId.HasValue)
-        {
-            source = source.Where(x => x.Ticket.CategoryId == query.CategoryId.Value);
-        }
-
-        if (query.CustomerId.HasValue)
-        {
-            source = source.Where(x => x.Ticket.CustomerId == query.CustomerId.Value);
-        }
-
-        if (query.AssignedAgentId.HasValue)
-        {
-            source = source.Where(x => x.Ticket.AssignedAgentId == query.AssignedAgentId.Value);
-        }
-
-        if (query.UnassignedOnly)
-        {
-            source = source.Where(x => x.Ticket.AssignedAgentId == null);
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Search))
-        {
-            var search = query.Search.Trim();
-            source = source.Where(x =>
-                x.Ticket.Title.Contains(search) ||
-                x.Ticket.Reference.Contains(search) ||
-                x.Customer.Name.Contains(search));
-        }
-
-        return source;
-    }
-
     private static IQueryable<TicketWithLabels> ApplySort(IQueryable<TicketWithLabels> source, TicketQuery query)
     {
         var descending = !string.Equals(query.SortDirection, "asc", StringComparison.OrdinalIgnoreCase);
@@ -186,16 +144,5 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
 
         // Keeps paging stable when the sort column has duplicates.
         return sorted.ThenByDescending(x => x.Ticket.Id);
-    }
-
-    private sealed class TicketWithLabels
-    {
-        public required Ticket Ticket { get; init; }
-
-        public required Customer Customer { get; init; }
-
-        public required Category Category { get; init; }
-
-        public Agent? Agent { get; init; }
     }
 }

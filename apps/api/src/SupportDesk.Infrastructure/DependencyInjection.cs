@@ -5,6 +5,7 @@ using SupportDesk.Application.Abstractions;
 using SupportDesk.Domain.Repositories;
 using SupportDesk.Infrastructure.Data;
 using SupportDesk.Infrastructure.Queries;
+using SupportDesk.Infrastructure.Queries.Filters;
 using SupportDesk.Infrastructure.Repositories;
 using SupportDesk.Infrastructure.Services;
 
@@ -35,6 +36,14 @@ public static class DependencyInjection
         services.AddScoped<IAgentRepository, AgentRepository>();
         services.AddScoped<ICustomerRepository, CustomerRepository>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
+
+        services.AddSingleton<ITicketFilter, StatusTicketFilter>();
+        services.AddSingleton<ITicketFilter, PriorityTicketFilter>();
+        services.AddSingleton<ITicketFilter, CategoryTicketFilter>();
+        services.AddSingleton<ITicketFilter, CustomerTicketFilter>();
+        services.AddSingleton<ITicketFilter, AssignedAgentTicketFilter>();
+        services.AddSingleton<ITicketFilter, UnassignedOnlyTicketFilter>();
+        services.AddSingleton<ITicketFilter, SearchTicketFilter>();
 
         services.AddScoped<ITicketQueries, TicketQueries>();
         services.AddScoped<ICustomerQueries, CustomerQueries>();
