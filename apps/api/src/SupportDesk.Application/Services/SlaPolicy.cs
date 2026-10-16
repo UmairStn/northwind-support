@@ -20,19 +20,9 @@ public interface ISlaPolicy
 /// <summary>
 /// Domain service implementing BR-2, BR-3, and BR-6: Configurable SLA window calculation and customer tier adjustment.
 /// </summary>
-public sealed class SlaPolicy : ISlaPolicy
+public sealed class SlaPolicy(IOptions<SlaOptions> options) : ISlaPolicy
 {
-    private readonly SlaOptions _options;
-
-    public SlaPolicy(IOptions<SlaOptions> options)
-    {
-        _options = options.Value;
-    }
-
-    public SlaPolicy(SlaOptions? options = null)
-    {
-        _options = options ?? new SlaOptions();
-    }
+    private readonly SlaOptions _options = options.Value;
 
     public SlaCalculationResult CalculateDue(DateTime startTimeUtc, TicketPriority priority, CustomerTier customerTier)
     {
