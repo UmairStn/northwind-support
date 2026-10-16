@@ -52,6 +52,7 @@ public static class DependencyInjection
         services.AddScoped<ICustomerQueries, CustomerQueries>();
         services.AddScoped<IAgentQueries, AgentQueries>();
         services.AddScoped<ICategoryQueries, CategoryQueries>();
+        services.AddScoped<ISlaReportQueries, SupportDesk.Infrastructure.Queries.Reports.SlaReportQueries>();
 
         services.AddScoped<SupportDbSeeder>();
 

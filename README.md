@@ -98,6 +98,7 @@ Both pass on a clean checkout and neither needs a database.
 | `GET /api/tickets/{id}/escalations` | Escalation history for a ticket |
 | `PATCH /api/tickets/{id}/status` · `/assignment` | Change status / assignee |
 | `GET /api/customers` · `/api/agents` · `/api/categories` | Reference data |
+| `GET /api/reports/sla-summary` | SLA performance report aggregated in SQL by `agent` or `priority` (`from`, `to`) |
 
 Errors are `ProblemDetails`: `400` validation, `404` not found, `409` conflict or business rule.
 

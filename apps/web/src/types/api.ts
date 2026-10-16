@@ -205,3 +205,31 @@ export interface ProblemDetails {
   traceId?: string;
   errors?: Record<string, string[]>;
 }
+
+export interface SlaSummaryReportQuery {
+  from?: string;
+  to?: string;
+  groupBy: 'agent' | 'priority';
+}
+
+export interface SlaSummaryReportItem {
+  groupKey: string;
+  groupLabel: string;
+  agentId: number | null;
+  priority: TicketPriority | null;
+  totalTickets: number;
+  breachedCount: number;
+  atRiskCount: number;
+  withinCount: number;
+  metCount: number;
+  breachRate: number;
+  averageResolutionHours: number | null;
+}
+
+export interface SlaSummaryReport {
+  groupBy: 'agent' | 'priority';
+  from?: string | null;
+  to?: string | null;
+  items: SlaSummaryReportItem[];
+}
+

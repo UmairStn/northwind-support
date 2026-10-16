@@ -5,6 +5,7 @@ import { LoginPage } from './features/auth/LoginPage';
 import { ProtectedRoute } from './features/auth/ProtectedRoute';
 import { CustomerDetailPage } from './features/customers/CustomerDetailPage';
 import { CustomerListPage } from './features/customers/CustomerListPage';
+import { ReportsPage } from './features/reports/ReportsPage';
 import { CreateTicketPage } from './features/tickets/CreateTicketPage';
 import { TicketDetailPage } from './features/tickets/TicketDetailPage';
 import { TicketListPage } from './features/tickets/TicketListPage';
@@ -24,6 +25,7 @@ export const router = createBrowserRouter([
           { path: 'tickets/:id', element: <TicketDetailPage /> },
           { path: 'customers', element: <CustomerListPage /> },
           { path: 'customers/:id', element: <CustomerDetailPage /> },
+          { path: 'reports', element: <ReportsPage /> },
         ],
       },
       { path: '*', element: <NotFoundPage /> },

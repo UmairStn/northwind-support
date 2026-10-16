@@ -40,6 +40,12 @@ The application follows **Clean Architecture** and **Domain-Driven Design (DDD)*
 - **Derived SLA Status**:
   - SLA status is derived dynamically (`NotApplicable`, `WithinSla`, `AtRisk`, `Breached`, `Met`), never stored in the database.
   - Injected `ISystemClock` abstraction across all calculations to allow deterministic unit testing without wall-clock flakiness.
+- **Task 2.5 Optional Stretch — SLA Summary Report**:
+  - *Single Database-Side Aggregation*: Implemented `GET /api/reports/sla-summary?from=&to=&groupBy=agent|priority` executing entirely inside the database engine via a single EF Core `GroupBy` query.
+  - *No In-Memory Grouping*: Avoided loading tickets into C# memory. SQL Server executes `COUNT(*)`, conditional aggregations (`SUM(CASE WHEN ... THEN 1 ELSE 0 END)`), and `AVG(DATEDIFF(minute, CreatedAtUtc, ResolvedAtUtc) / 60.0)` directly.
+  - *Unassigned Ticket Preservation*: Left-joined `Tickets` against `Agents` so unassigned tickets are accurately represented as `GroupKey = "unassigned"`, `GroupLabel = "Unassigned"` rather than being omitted.
+  - *Clean Architecture & SOLID*: Decoupled query orchestration into `GetSlaSummaryReportQueryHandler`, abstract seam `ISlaReportQueries`, and `SlaReportQueries` in Infrastructure.
+  - *End-to-End Frontend View*: Built an accessible reports dashboard in React 19 (`/reports`) with real-time grouping toggles, date filters, summary cards, and SLA breakdown tables.
 
 ### Task 3: Login and Authentication
 - **Credential Storage**:

@@ -22,6 +22,7 @@ export function App() {
           <nav className="app__nav" aria-label="Main">
             <NavLink to="/tickets">Tickets</NavLink>
             <NavLink to="/customers">Customers</NavLink>
+            <NavLink to="/reports">Reports</NavLink>
           </nav>
         )}
 
