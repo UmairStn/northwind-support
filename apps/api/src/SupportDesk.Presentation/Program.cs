@@ -8,6 +8,7 @@ using SupportDesk.Application.Configuration;
 using SupportDesk.Infrastructure;
 using SupportDesk.Presentation.Extensions;
 using SupportDesk.Presentation.Filters;
+using SupportDesk.Presentation.Health;
 using SupportDesk.Presentation.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -71,6 +72,9 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database");
+
 var app = builder.Build();
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
@@ -88,6 +92,9 @@ app.UseCors(FrontendCorsPolicy);
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Central health endpoint (DK-7): reports database reachability, open without a token.
+app.MapHealthChecks("/health").AllowAnonymous();
 
 app.MapControllers();
 

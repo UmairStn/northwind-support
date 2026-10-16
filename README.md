@@ -77,6 +77,7 @@ Both pass on a clean checkout and neither needs a database.
 
 | Command | What it does |
 | --- | --- |
+| `docker compose up --build` | Run both SQL Server and the API containerized |
 | `npm run db:up` / `db:down` / `db:reset` | Start / stop / wipe SQL Server |
 | `npm run api` / `npm run web` | Run the API / the React app |
 | `npm run build` | Build both |
@@ -87,9 +88,14 @@ Both pass on a clean checkout and neither needs a database.
 
 | Endpoint | Description |
 | --- | --- |
-| `GET /api/tickets` | Paged list with `search`, `status`, `priority`, `categoryId`, `customerId`, `assignedAgentId`, `unassignedOnly`, `sortBy`, `sortDirection`. **Filters are accepted but not applied yet** (Task 1). |
+| `GET /health` | Health check reporting database connectivity (open without token) |
+| `POST /api/auth/login` | Sign in with email and password, returning JWT token |
+| `GET /api/auth/me` | Current authenticated agent details |
+| `GET /api/tickets` | Paged list with search, status, priority, category, customer, agent, SLA status |
 | `GET /api/tickets/{id}` | One ticket |
-| `POST /api/tickets` | Create a ticket |
+| `POST /api/tickets` | Create a ticket with automated priority, SLA due date, and agent triage |
+| `POST /api/tickets/{id}/escalate` | Escalate ticket priority and re-evaluate owner |
+| `GET /api/tickets/{id}/escalations` | Escalation history for a ticket |
 | `PATCH /api/tickets/{id}/status` · `/assignment` | Change status / assignee |
 | `GET /api/customers` · `/api/agents` · `/api/categories` | Reference data |
 
@@ -153,3 +159,84 @@ As specified in `ASSIGNMENT_CANDIDATE.md` (Section 3.4), the following features 
 - Multi-factor authentication (MFA)
 - Account lockout / IP rate limiting
 - Complex role-permission matrices
+
+---
+
+## Task 4: Dockerise the API Documentation
+
+### Overview & Architecture
+Task 4 packages the .NET 10 API into an immutable, multi-stage Docker container (`apps/api/Dockerfile`) orchestratable alongside SQL Server via `docker-compose.yml`.
+
+### Key Design & Implementation Decisions
+
+1. **Multi-Stage Build & Layer Caching (`DK-1`)**:
+   - **Build Stage**: Uses `mcr.microsoft.com/dotnet/sdk:10.0`. To maximize Docker layer cache hits, `global.json`, `Directory.Build.props`, `Directory.Packages.props`, and the 4 `.csproj` files (`Domain`, `Application`, `Infrastructure`, `Presentation`) are copied first.
+   - `dotnet restore apps/api/src/SupportDesk.Presentation/SupportDesk.Presentation.csproj` is executed in its own layer. Subsequent source code changes (`COPY apps/api/src/ apps/api/src/`) invalidate only the compilation and publish layers, reusing the cached restore layer (`CACHED`).
+   - Published with `-c Release -o /app/publish --no-restore`.
+2. **Context & Ignore Hygiene (`DK-2`)**:
+   - Built from repository root as context (`build: context: . dockerfile: apps/api/Dockerfile`).
+   - `.dockerignore` excludes `bin/`, `obj/`, `node_modules/`, `.git/`, `.env`, and `apps/web/` so no host artifacts or secrets enter the build context.
+3. **Least Privilege Non-Root Execution (`DK-3`)**:
+   - The runtime stage uses `mcr.microsoft.com/dotnet/aspnet:10.0` and switches to the built-in non-root user `USER $APP_UID` (UID `1654`, user `app`).
+   - Listens on unprivileged HTTP port 8080 (`ASPNETCORE_HTTP_PORTS=8080`, `EXPOSE 8080`).
+   - No certificates are baked into the image; TLS is terminated at a reverse proxy/ingress in front of the container in production.
+4. **Zero Baked Secrets & Runtime Configuration (`DK-4`)**:
+   - No connection strings, JWT keys, or credentials exist in the image or Dockerfile.
+   - All configuration is injected via container environment variables in `docker-compose.yml`:
+     - `ConnectionStrings__Default`
+     - `Jwt__Key`
+     - `ASPNETCORE_ENVIRONMENT=Development`
+5. **Orchestration & Health Dependencies (`DK-5`)**:
+   - In `docker-compose.yml`, the `api` service exposes `5080:8080` (accessible at `http://localhost:5080`).
+   - Connects to SQL Server via its Docker service name `sqlserver` on port 1433 (`Server=sqlserver,1433`).
+   - Starts only after SQL Server passes its health check (`depends_on: sqlserver: condition: service_healthy`).
+6. **Central Health Check Endpoint (`DK-7`)**:
+   - Implemented `DatabaseHealthCheck` in `SupportDesk.Presentation.Health`, verifying DB reachability via `SupportDbContext.Database.CanConnectAsync()`.
+   - Exposed at `GET /health` with `app.MapHealthChecks("/health").AllowAnonymous();`.
+   - Centrally configured as an exception to the Task 3 `FallbackPolicy`, responding `200 OK` ("Healthy") without requiring a JWT token.
+7. **Frontend Proxy Integration (`DK-8`)**:
+   - The React frontend dev server can proxy to the containerized API via:
+     ```bash
+     VITE_API_PROXY_TARGET=http://localhost:5080 npm run web
+     ```
+
+### Verification Results (per Section 4.2)
+
+- **Clean Volume Startup (`DK-6`)**:
+  - Ran `docker compose down -v && docker compose up --build -d`.
+  - SQL Server started, became healthy, and the API container applied all EF Core migrations and seeded 40 tickets, 6 customers, 5 categories, and 6 agents on an empty volume.
+  - `GET http://localhost:5080/health` returns `200 OK` (`Healthy`).
+  - `POST http://localhost:5080/api/auth/login` and `GET http://localhost:5080/api/tickets` return the 40 seeded tickets with JWT authentication.
+- **Restore Layer Caching**:
+  - Modifying a `.cs` file and rebuilding (`docker compose build api`) reuses the cached restore layer (`RUN dotnet restore ... CACHED`), rebuilding in ~4 seconds.
+- **Image Size Comparison**:
+  - SDK image (`mcr.microsoft.com/dotnet/sdk:10.0`): **1.3 GB**
+  - Runtime base image (`mcr.microsoft.com/dotnet/aspnet:10.0`): **340 MB**
+  - Published API image (`northwind-support-api:latest`): **455 MB**
+  - **Savings**: ~845 MB reduction (65% smaller than the SDK image).
+- **Non-Root Execution**:
+  - `docker compose exec api whoami` prints `app`.
+  - `docker compose exec api id` prints `uid=1654(app) gid=1654(app) groups=1654(app)`.
+
+### Production Database Migration Strategy
+
+In local development, the API applies EF Core migrations and demo seeds at startup via `await app.MigrateAndSeedAsync()` when `ASPNETCORE_ENVIRONMENT=Development`. 
+
+**Why this is NOT done in production:**
+1. **Concurrency & Race Conditions**: In production environments with multiple API replicas (e.g. horizontally autoscaled pods in Kubernetes or ECS tasks), replicas starting concurrently will race to apply migrations simultaneously, leading to lock contention, migration failures, or corrupted migration history tables.
+2. **Principle of Least Privilege**: Running migrations on application startup requires the API runtime connection string to possess DDL privileges (`CREATE TABLE`, `ALTER TABLE`, `DROP INDEX`). In production, the running API should only have DML permissions (`SELECT`, `INSERT`, `UPDATE`, `DELETE`).
+3. **Deployment Safety & Zero-Downtime Rollouts**: If a migration fails during application startup, container instances crash-loop, disrupting existing traffic.
+
+**Production Recommendation:**
+- **CI/CD Pipeline Deployment**: Generate idempotent SQL migration scripts at build time via `dotnet ef migrations script --idempotent` and apply them in a controlled deployment pipeline with DBA review and rollback plans.
+- **Migration InitContainer / Bundle**: If automated during deployment, run a single-instance Kubernetes Job or `initContainer` using an EF Core Migration Bundle (`dotnet ef migrations bundle`) that executes with elevated DDL privileges, verifies success, and terminates before live API replicas are rolled out.
+
+### Known Limitations (Out of Scope)
+As specified in `ASSIGNMENT_CANDIDATE.md` (Section 4.3):
+- Kubernetes manifests / Helm charts
+- Image pushing to external container registries (e.g., ACR / ECR)
+- CI/CD container pipeline configuration
+- In-container HTTPS / TLS certificates (terminated at edge/reverse proxy)
+- Dockerising the React web application
+- Docker secrets / secret vaults (Vault, AWS Secrets Manager)
+- Multi-architecture container builds (ARM64 cross-compilation)

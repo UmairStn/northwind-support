@@ -1,0 +1,26 @@
+# Version control and editor
+.git/
+**/.git
+**/.github
+**/.vscode
+
+# Build output
+bin/
+**/bin/
+obj/
+**/obj/
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+
+# Frontend application (DK-2: keep web app out of the API build context)
+apps/web/
+
+# Documentation and root files
+*.md
