@@ -125,7 +125,7 @@ public sealed class AgentAssignmentService : IAgentAssignmentService
         }
 
         // Since the ticket is already held by this agent, open ticket count is within limit
-        if (agent.OpenTicketCount > agent.MaxOpenTickets)
+        if (agent.OpenTicketCount >= agent.MaxOpenTickets)
         {
             return false;
         }

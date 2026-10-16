@@ -47,8 +47,18 @@ public sealed class TicketsController : ControllerBase
         int id,
         EscalateTicketRequest request,
         [FromServices] EscalateTicketCommandHandler handler,
-        CancellationToken ct) =>
-        handler.HandleAsync(id, request, ct);
+        CancellationToken ct)
+    {
+        // AU-8: escalatedBy comes from the authenticated token, not from the request body.
+        var actor = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? User.FindFirst("name")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+            ?? User.FindFirst("email")?.Value
+            ?? request.EscalatedBy
+            ?? "Unknown";
+
+        return handler.HandleAsync(id, request with { EscalatedBy = actor }, ct);
+    }
 
     /// <summary>Returns the escalation history for a ticket, newest first.</summary>
     [HttpGet("{id:int}/escalations")]

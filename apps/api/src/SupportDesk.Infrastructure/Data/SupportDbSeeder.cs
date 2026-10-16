@@ -17,13 +17,35 @@ namespace SupportDesk.Infrastructure.Data;
 /// Every aggregate is built through its own behaviour. The two historical values no behaviour
 /// produces - a ticket's last update and its due date - are set through EF Core directly.
 /// </remarks>
-public sealed class SupportDbSeeder(SupportDbContext db, IClock clock, ILogger<SupportDbSeeder> logger)
+public sealed class SupportDbSeeder(SupportDbContext db, IClock clock, IPasswordHasher passwordHasher, ILogger<SupportDbSeeder> logger)
 {
+    /// <summary>
+    /// Local fixture password for all seeded development agents (AU-3).
+    /// Documented here and in .env.example.
+    /// </summary>
+    public const string DevelopmentPassword = "LocalDev123!";
+
     /// <summary>Seeds the database, unless it already has tickets in it.</summary>
     public async Task SeedAsync(CancellationToken ct = default)
     {
         if (await db.Set<Ticket>().AnyAsync(ct))
         {
+            // Backfill password hashes for existing agents if they were seeded prior to auth migration (AU-3).
+            var agentsWithoutPassword = await db.Set<Agent>()
+                .Where(a => string.IsNullOrEmpty(a.PasswordHash))
+                .ToListAsync(ct);
+
+            if (agentsWithoutPassword.Count > 0)
+            {
+                var defaultHash = passwordHasher.HashPassword(DevelopmentPassword);
+                foreach (var agent in agentsWithoutPassword)
+                {
+                    agent.SetPasswordHash(defaultHash);
+                }
+                await db.SaveChangesAsync(ct);
+                logger.LogInformation("Backfilled password hashes for {Count} existing agents.", agentsWithoutPassword.Count);
+            }
+
             logger.LogInformation("Seed data already present; skipping.");
             return;
         }
@@ -32,7 +54,7 @@ public sealed class SupportDbSeeder(SupportDbContext db, IClock clock, ILogger<S
 
         var categories = SeedCategories();
         var customers = SeedCustomers(now);
-        var agents = SeedAgents(now);
+        var agents = SeedAgents(now, passwordHasher);
 
         db.AddRange(categories);
         db.AddRange(customers);
@@ -69,20 +91,27 @@ public sealed class SupportDbSeeder(SupportDbContext db, IClock clock, ILogger<S
         new("Wide World Importers", "support@wideworld.example", "+65 6555 0106", CustomerTier.Premium, now.AddDays(-90))
     ];
 
-    private static List<Agent> SeedAgents(DateTime now)
+    private static List<Agent> SeedAgents(DateTime now, IPasswordHasher hasher)
     {
         var yuki = new Agent("Yuki Tanaka", "yuki.tanaka@northwind-support.example", 8, now.AddDays(-600));
         yuki.Deactivate();
 
-        return
-        [
+        var agents = new List<Agent>
+        {
             new("Alex Turner", "alex.turner@northwind-support.example", 10, now.AddDays(-500)),
             new("Ben Osei", "ben.osei@northwind-support.example", 8, now.AddDays(-460)),
             new("Priya Nair", "priya.nair@northwind-support.example", 8, now.AddDays(-400)),
             new("Sara Lindqvist", "sara.lindqvist@northwind-support.example", 6, now.AddDays(-280)),
             new("Marcus Doyle", "marcus.doyle@northwind-support.example", 6, now.AddDays(-200)),
             yuki
-        ];
+        };
+
+        foreach (var agent in agents)
+        {
+            agent.SetPasswordHash(hasher.HashPassword(DevelopmentPassword));
+        }
+
+        return agents;
     }
 
     /// <summary>

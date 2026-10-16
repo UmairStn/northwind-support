@@ -30,7 +30,9 @@ export function useTicketList() {
   const [filters, setFilters] = useState<TicketFilters>(emptyFilters);
   const [state, setState] = useState<State>({ isLoading: true });
   const filtersRef = useRef(filters);
-  filtersRef.current = filters;
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
 
   const prevSearchRef = useRef(filters.search);
 

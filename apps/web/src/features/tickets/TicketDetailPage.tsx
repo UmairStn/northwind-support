@@ -28,7 +28,11 @@ export function TicketDetailPage() {
     }
 
     let isMounted = true;
-    setIsLoadingEscalations(true);
+    Promise.resolve().then(() => {
+      if (isMounted) {
+        setIsLoadingEscalations(true);
+      }
+    });
 
     ticketsApi
       .getEscalations(ticketId)

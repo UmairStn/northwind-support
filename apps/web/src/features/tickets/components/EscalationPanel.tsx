@@ -67,7 +67,6 @@ export function EscalationPanel({ ticket, onEscalated }: EscalationPanelProps) {
     try {
       const result = await ticketsApi.escalateTicket(ticket.id, {
         reason: reason.trim(),
-        escalatedBy: 'Support Lead',
       });
 
       setReason('');

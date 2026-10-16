@@ -39,6 +39,9 @@ public sealed class Agent : AggregateRoot
 
     public DateTime CreatedAtUtc { get; private set; }
 
+    /// <summary>Hashed and salted credentials for agent authentication (AU-1, AU-2).</summary>
+    public string PasswordHash { get; private set; } = string.Empty;
+
     /// <summary>The ticket categories this agent is qualified for.</summary>
     public IReadOnlyCollection<AgentSpecialization> Specializations => _specializations;
 
@@ -55,4 +58,11 @@ public sealed class Agent : AggregateRoot
 
     /// <summary>Stops the agent from taking new work. Their history is kept.</summary>
     public void Deactivate() => IsActive = false;
+
+    /// <summary>Updates the agent's password hash.</summary>
+    public void SetPasswordHash(string passwordHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
+        PasswordHash = passwordHash;
+    }
 }

@@ -30,6 +30,7 @@ public static class DependencyInjection
         services.AddScoped<ChangeTicketStatusCommandHandler>();
         services.AddScoped<AssignTicketCommandHandler>();
         services.AddScoped<EscalateTicketCommandHandler>();
+        services.AddScoped<SupportDesk.Application.Features.Auth.Commands.Login.LoginCommandHandler>();
 
         services.AddScoped<SearchTicketsQueryHandler>();
         services.AddScoped<GetTicketQueryHandler>();

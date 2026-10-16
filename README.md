@@ -107,3 +107,49 @@ and 40 tickets across every status, priority and SLA state.
 | Browser warns about the certificate | `dotnet dev-certs https --trust`, or use the web app, which proxies |
 | Web app shows "Unable to load tickets" | The API is not running, or `VITE_API_PROXY_TARGET` points at the wrong port |
 | SQL Server slow on Apple Silicon | Enable Rosetta in Docker Desktop → Settings → General |
+
+---
+
+## Task 3: Login and Authentication Documentation
+
+### Design Decisions & Architecture
+1. **Credential Storage on `Agent` Aggregate (`AU-1`)**:
+   - In Northwind Support Desk, every authenticated user is an internal support agent (Alex, Ben, Priya, Sara, Marcus, Yuki).
+   - Adding `PasswordHash` directly to `Agent` avoids unnecessary table joins and separate aggregate lifecycle synchronization. A committed EF Core migration (`AddAgentPasswordHash`) adds this column.
+2. **Password Hashing & Salting (`AU-2`)**:
+   - Uses standard PBKDF2 with HMAC-SHA256, 16-byte cryptographically secure random salt, and 100,000 iterations.
+   - Password verification compares computed hash using `CryptographicOperations.FixedTimeEquals` to prevent timing side-channel attacks.
+3. **Token Issuance & Lifetime (`AU-4`, `AU-7`)**:
+   - JWT tokens are signed using HMAC-SHA256 with the key configured in `appsettings.Development.json` (and `.env.example`).
+   - Token lifetime is set to **8 hours (480 minutes)** to cover a standard agent work shift without requiring mid-shift re-authentication.
+4. **Central Authorization Enforcement (`AU-6`)**:
+   - Central authorization is configured via ASP.NET Core `FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build()`.
+   - Every existing and new endpoint requires a valid JWT by default without needing repetitive attributes.
+   - Only `POST /api/auth/login` and Swagger UI are marked `[AllowAnonymous]`.
+5. **Escalation Identity from Token (`AU-8`)**:
+   - In `TicketsController.Escalate`, the `escalatedBy` field is extracted directly from the authenticated agent's JWT token (`User.Identity.Name`), eliminating client-side spoofing.
+6. **Client Storage & Security Trade-offs (`AU-10`, `AU-13`)**:
+   - Client stores the token in `localStorage` and automatically attaches it via `request()` in `apps/web/src/api/client.ts`.
+   - Any `401 Unauthorized` response immediately clears the session and redirects the visitor to `/login`.
+   - *Trade-off*: `localStorage` is convenient and survives page reloads and multiple tabs in this SPA, but is vulnerable to XSS. In a production environment with dedicated domains, `HttpOnly`, `SameSite=Strict`, `Secure` cookies paired with anti-CSRF protection or memory storage with rotating refresh tokens would be preferred.
+
+### Development Login Credentials (`AU-3`)
+| Agent | Email | Password | Status |
+| :--- | :--- | :--- | :--- |
+| **Alex Turner** | `alex.turner@northwind-support.example` | `LocalDev123!` | Active (Can log in) |
+| **Ben Osei** | `ben.osei@northwind-support.example` | `LocalDev123!` | Active (Can log in) |
+| **Priya Nair** | `priya.nair@northwind-support.example` | `LocalDev123!` | Active (Can log in) |
+| **Sara Lindqvist** | `sara.lindqvist@northwind-support.example` | `LocalDev123!` | Active (Can log in) |
+| **Marcus Doyle** | `marcus.doyle@northwind-support.example` | `LocalDev123!` | Active (Can log in) |
+| **Yuki Tanaka** | `yuki.tanaka@northwind-support.example` | `LocalDev123!` | **Inactive** (Login rejected with 401 per AU-4) |
+
+### Known Limitations (Out of Scope)
+As specified in `ASSIGNMENT_CANDIDATE.md` (Section 3.4), the following features were deliberately not built:
+- User registration / self-service sign up
+- Password reset / "forgot password"
+- Email verification
+- OAuth / SSO / External identity providers
+- Refresh tokens and rotating sessions
+- Multi-factor authentication (MFA)
+- Account lockout / IP rate limiting
+- Complex role-permission matrices

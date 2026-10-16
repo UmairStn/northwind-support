@@ -25,20 +25,69 @@ export class ApiError extends Error {
   }
 }
 
+const TOKEN_KEY = 'northwind_support_token';
+const USER_KEY = 'northwind_support_user';
+
+export function getStoredToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredSession(token: string, user: unknown): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  } catch {
+    // Ignore storage quota or access errors in sandbox/private browsing
+  }
+}
+
+export function clearStoredSession(): void {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function getStoredUser<T>(): T | null {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The single place that talks to the API. Returns parsed JSON, or throws an
  * {@link ApiError} that callers can show to the user.
  */
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getStoredToken();
+  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders,
       ...(init?.headers ?? {}),
     },
   });
 
   if (!response.ok) {
+    if (response.status === 401 && !path.includes('/auth/login')) {
+      clearStoredSession();
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+      }
+    }
+
     const problem = await readProblem(response);
 
     throw new ApiError(

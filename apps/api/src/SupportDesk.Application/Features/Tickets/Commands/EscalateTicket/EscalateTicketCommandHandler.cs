@@ -94,7 +94,7 @@ public sealed class EscalateTicketCommandHandler(
             fromDueAtUtc,
             slaResult.DueAtUtc,
             request.Reason,
-            request.EscalatedBy,
+            request.EscalatedBy ?? "Unknown",
             now);
 
         await tickets.AddEscalationAsync(escalation, ct);

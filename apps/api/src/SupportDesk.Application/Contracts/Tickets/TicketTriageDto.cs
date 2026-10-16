@@ -13,5 +13,6 @@ public sealed record TicketTriageDto(
     int? AssignedAgentId,
     string AssignmentReason)
 {
+    public TicketPriority Priority => AppliedPriority;
     public string SlaCalculationReason => SlaReason;
 }

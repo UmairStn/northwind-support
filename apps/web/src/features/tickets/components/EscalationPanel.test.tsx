@@ -21,8 +21,8 @@ const baseTicket: TicketDetail = {
   status: 'Open',
   priority: 'High',
   customer: { id: 1, name: 'Contoso Ltd', email: 'contoso@example.com', phone: null, tier: 'Premium' },
-  category: { id: 2, name: 'Billing', requiresSpecialist: false, forcesCriticalPriority: false },
-  assignedAgent: { id: 1, fullName: 'Alex Turner', email: 'alex@example.com' },
+  category: { id: 2, name: 'Billing', requiresSpecialist: false },
+  assignedAgent: { id: 1, fullName: 'Alex Turner' },
   createdAtUtc: '2026-10-15T10:00:00Z',
   updatedAtUtc: '2026-10-15T10:00:00Z',
   dueAtUtc: '2026-10-15T18:00:00Z',
@@ -105,7 +105,6 @@ describe('EscalationPanel', () => {
     await waitFor(() => {
       expect(mockEscalateTicket).toHaveBeenCalledWith(42, {
         reason: 'Urgent production outage',
-        escalatedBy: 'Support Lead',
       });
       expect(onEscalated).toHaveBeenCalledWith(updatedTicket, escalation);
     });
