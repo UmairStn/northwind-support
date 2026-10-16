@@ -43,46 +43,67 @@ Full requirements are in **[`ASSIGNMENT_CANDIDATE.md`](ASSIGNMENT_CANDIDATE.md)*
 
 ## Quick start
 
-**Prerequisites:** .NET SDK 10 (`global.json`), Node.js 22 (`.nvmrc`; 20.19+ works), Docker.
+**Prerequisites:** .NET SDK 10 (`global.json`), Node.js 22 (`.nvmrc`; 20.19+ works), Docker Desktop.
 
+### Option A: Local Development (Default)
+Run SQL Server in Docker, then run the API and Web client locally:
 ```bash
 cp .env.example .env          # optional, every value has a working default
-npm install                   # installs the web app
-npm run db:up                 # SQL Server 2022 in Docker on localhost:1433
-npm run api                   # terminal 1: migrates, seeds, then serves the API
-npm run web                   # terminal 2: React dev server
+npm install                   # install web dependencies
+npm run db:up                 # terminal 1: SQL Server in Docker on localhost:1433
+npm run api                   # terminal 2: API (migrates, seeds, serves on localhost:7043/5043)
+npm run web                   # terminal 3: React dev server on http://localhost:5173
 ```
 
-| What | Where |
-| --- | --- |
-| Web app | http://localhost:5173 |
-| API | https://localhost:7043 (also http://localhost:5043) |
-| Swagger | https://localhost:7043/swagger |
+### Option B: Running with Docker (Containerized Backend)
+Run the full backend (SQL Server + containerized API) using Docker Compose (Task 4):
+```bash
+# Start both SQL Server and the API container in the background
+docker compose up -d --build
 
-In Development the API applies migrations and seeds demo data on startup. **Never commit real
-credentials.**
+# Run the React client pointing to the containerized API (localhost:5080)
+VITE_API_PROXY_TARGET=http://localhost:5080 npm run web
+```
 
-**Visual Studio 2026:** run `npm run db:up`, open `SupportDesk.sln`, set
-**SupportDesk.Presentation** as the startup project, and press F5 on the **https** profile.
+| Service | Address | Notes |
+| --- | --- | --- |
+| **Web app** | http://localhost:5173 | React 19 SPA |
+| **API (Local)** | https://localhost:7043 / http://localhost:5043 | Local .NET dev server |
+| **API (Docker)** | http://localhost:5080 | Containerized API (`docker compose up`) |
+| **Swagger UI** | https://localhost:7043/swagger or http://localhost:5080/swagger | Open without auth |
+| **Health Check** | http://localhost:5080/health | Database connectivity probe |
+
+In Development the API automatically applies migrations and seeds demo data on startup.
+
+**Visual Studio 2026:** run `npm run db:up`, open `SupportDesk.sln`, set **SupportDesk.Presentation** as the startup project, and press F5 on the **https** profile.
 
 ## Tests
 
 ```bash
-npm test                      # dotnet test, then the web tests (Vitest)
+npm test                      # Run both test suites (110 .NET tests + 29 Vitest tests)
+dotnet test                   # Run backend tests only
+npm run test --workspace apps/web  # Run frontend tests only
 ```
 
-Both pass on a clean checkout and neither needs a database.
+Both pass on a clean checkout and neither needs a running database.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `docker compose up --build` | Run both SQL Server and the API containerized |
-| `npm run db:up` / `db:down` / `db:reset` | Start / stop / wipe SQL Server |
-| `npm run api` / `npm run web` | Run the API / the React app |
-| `npm run build` | Build both |
-| `npm run lint` / `typecheck` / `format` | Web lint and types / `dotnet format` |
-| `npm run ef -- migrations add <Name>` | Add an EF Core migration |
+| `docker compose up -d --build` | Build and start SQL Server and API containers in background |
+| `docker compose down -v` | Stop containers and wipe the database volume |
+| `docker compose logs -f api` | Stream logs from the containerized API service |
+| `docker compose exec api whoami` | Verify the container process executes as non-root user `app` |
+| `VITE_API_PROXY_TARGET=http://localhost:5080 npm run web` | Run React dev server against the containerized API |
+| `npm run db:up` / `db:down` / `db:reset` | Start / stop / wipe standalone SQL Server container |
+| `npm run api` / `npm run web` | Run the local .NET API / the React dev server |
+| `npm test` | Run all automated tests (backend + frontend) |
+| `npm run build` | Build both the .NET solution and the React client bundle |
+| `npm run lint` / `typecheck` | Run ESLint and TypeScript strict typechecks (`tsc -b`) |
+| `npm run format` / `format:check` | Run `dotnet format` to apply or check code formatting |
+| `npm run ef -- migrations add <Name>` | Add a new EF Core migration |
+| `npm run db:migrate` | Apply EF Core migrations to local database |
 
 ## API at a glance
 
@@ -117,127 +138,66 @@ and 40 tickets across every status, priority and SLA state.
 
 ---
 
-## Task 3: Login and Authentication Documentation
-
-### Design Decisions & Architecture
-1. **Credential Storage on `Agent` Aggregate (`AU-1`)**:
-   - In Northwind Support Desk, every authenticated user is an internal support agent (Alex, Ben, Priya, Sara, Marcus, Yuki).
-   - Adding `PasswordHash` directly to `Agent` avoids unnecessary table joins and separate aggregate lifecycle synchronization. A committed EF Core migration (`AddAgentPasswordHash`) adds this column.
-2. **Password Hashing & Salting (`AU-2`)**:
-   - Uses standard PBKDF2 with HMAC-SHA256, 16-byte cryptographically secure random salt, and 100,000 iterations.
-   - Password verification compares computed hash using `CryptographicOperations.FixedTimeEquals` to prevent timing side-channel attacks.
-3. **Token Issuance & Lifetime (`AU-4`, `AU-7`)**:
-   - JWT tokens are signed using HMAC-SHA256 with the key configured in `appsettings.Development.json` (and `.env.example`).
-   - Token lifetime is set to **8 hours (480 minutes)** to cover a standard agent work shift without requiring mid-shift re-authentication.
-4. **Central Authorization Enforcement (`AU-6`)**:
-   - Central authorization is configured via ASP.NET Core `FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build()`.
-   - Every existing and new endpoint requires a valid JWT by default without needing repetitive attributes.
-   - Only `POST /api/auth/login` and Swagger UI are marked `[AllowAnonymous]`.
-5. **Escalation Identity from Token (`AU-8`)**:
-   - In `TicketsController.Escalate`, the `escalatedBy` field is extracted directly from the authenticated agent's JWT token (`User.Identity.Name`), eliminating client-side spoofing.
-6. **Client Storage & Security Trade-offs (`AU-10`, `AU-13`)**:
-   - Client stores the token in `localStorage` and automatically attaches it via `request()` in `apps/web/src/api/client.ts`.
-   - Any `401 Unauthorized` response immediately clears the session and redirects the visitor to `/login`.
-   - *Trade-off*: `localStorage` is convenient and survives page reloads and multiple tabs in this SPA, but is vulnerable to XSS. In a production environment with dedicated domains, `HttpOnly`, `SameSite=Strict`, `Secure` cookies paired with anti-CSRF protection or memory storage with rotating refresh tokens would be preferred.
+## Candidate Implementation & Deliverables
 
 ### Development Login Credentials (`AU-3`)
-| Agent | Email | Password | Status |
-| :--- | :--- | :--- | :--- |
-| **Alex Turner** | `alex.turner@northwind-support.example` | `LocalDev123!` | Active (Can log in) |
-| **Ben Osei** | `ben.osei@northwind-support.example` | `LocalDev123!` | Active (Can log in) |
-| **Priya Nair** | `priya.nair@northwind-support.example` | `LocalDev123!` | Active (Can log in) |
-| **Sara Lindqvist** | `sara.lindqvist@northwind-support.example` | `LocalDev123!` | Active (Can log in) |
-| **Marcus Doyle** | `marcus.doyle@northwind-support.example` | `LocalDev123!` | Active (Can log in) |
-| **Yuki Tanaka** | `yuki.tanaka@northwind-support.example` | `LocalDev123!` | **Inactive** (Login rejected with 401 per AU-4) |
+All seed agent accounts use the local fixture password `LocalDev123!`:
+- **Active Agents (Can log in)**: `alex.turner@northwind-support.example`, `ben.osei@northwind-support.example`, `priya.nair@northwind-support.example`, `sara.lindqvist@northwind-support.example`, `marcus.doyle@northwind-support.example`
+- **Inactive Agent (Login rejected with 401)**: `yuki.tanaka@northwind-support.example`
+
+### Task 1: Defect Fix & Server-Side Filtering
+- **DEFECT-117 Root Cause & Fix**: In `apps/web/src/features/tickets/hooks/useTicketList.ts`, filter dropdown updates were coupled with search input state in a single debounced flow. Decoupled them so dropdown changes immediately push query parameters and dispatch `GET /api/tickets`, while search typing remains debounced (300ms) with no request-per-keystroke.
+- **Verification**: Regression test in `useTicketList.test.ts` asserts immediate request dispatch on filter change. Manually verified with browser DevTools Network tab.
+- **Server-Side Filtering (`FL-1`–`FL-6`)**: Implemented in `TicketFilters.ApplyFilters` on `IQueryable<Ticket>`. Evaluates exact matches (`status`, `priority`, `categoryId`, `customerId`, `assignedAgentId`), `unassignedOnly`, and trimmed `search` (matching title, reference `TCK-0042`, or customer name) with logical `AND`.
+- **SQL Execution & Pagination**: Filters execute directly in SQL Server before `CountAsync()` and `Skip/Take` paging (verified via EF Core console logs). Adding Task 2's `slaStatus` was done as a single composable predicate without restructuring the query pipeline.
+
+### Task 2: Ticket Escalation, Assignment & SLA Report
+- **Automated Triage (`BR-1`–`BR-6`)**:
+  - `PriorityPolicy`: Category flagged `ForcesCriticalPriority` (Security, Outage) forces `Critical`; otherwise honors requested priority (default Medium).
+  - `SlaPolicy`: Base SLA windows (Critical 4h, High 8h, Medium 24h, Low 72h) halved for Premium customers with a 1-hour minimum floor. Configured via `IOptions<SlaOptions>`.
+  - `AgentAssignmentService`: Assigns to active specialists strictly below `MaxOpenTickets` limit with fewest open tickets (open = not Resolved/Closed), breaking ties deterministically by lowest agent `Id`. Returns HTTP 201 unassigned with human-readable reason when no specialist is eligible.
+- **Escalation (`BR-7`)**: Advances priority one step (`Low` → `Medium` → `High` → `Critical`), recomputes due date from `now`, re-evaluates owner, requires 5–500 char reason, and records immutable row in `TicketEscalations`. Rejects Critical or Resolved/Closed tickets with HTTP 409 Conflict.
+- **Derived SLA Status (`BR-8`)**: Evaluated dynamically (`WithinSla`, `AtRisk`, `Breached`, `Met`, `NotApplicable`) using injectable `ISystemClock` without storing state in DB.
+- **Database Indexing**: Committed migration `AddTicketEscalations`. Configured composite descending index `IX_TicketEscalations_TicketId_EscalatedAtUtc` (`TicketId ASC, EscalatedAtUtc DESC`) enabling index seek without sorting for newest-first history retrieval.
+- **Frontend Components**: Reusable `SlaIndicator` (accessible glyphs + labels, not color alone), escalation panel with validation and 409 conflict handling, and create triage breakdown.
+- **Task 2.5 Stretch (SLA Report)**: `GET /api/reports/sla-summary?from=&to=&groupBy=agent|priority` executes as a single SQL Server `GroupBy` aggregation using `COUNT(*)`, conditional `SUM(CASE WHEN ...)`, and `AVG(DATEDIFF)` with a left join to preserve unassigned tickets. Rendered in a dedicated `/reports` UI dashboard.
+
+### Task 3: Login and Authentication
+- **Architecture & Credentials (`AU-1`, `AU-2`)**: `PasswordHash` stored directly on `Agent` aggregate via migration `AddAgentPasswordHash` (since all users are agents, avoiding unnecessary joins). Passwords hashed using PBKDF2 with HMAC-SHA256, 16-byte random salt, and 100,000 iterations via `Rfc2898DeriveBytes`. Constant-time equality check via `CryptographicOperations.FixedTimeEquals`.
+- **Endpoints & Central Policy (`AU-4`–`AU-7`)**: `POST /api/auth/login` returns JWT with 8-hour lifetime (480 min). Wrong email/password return identical generic 401. ASP.NET Core `FallbackPolicy` centrally enforces authentication across all endpoints by default; only `login`, `/health`, and Swagger are `AllowAnonymous`.
+- **Actor Integrity (`AU-8`)**: `escalatedBy` is extracted directly from JWT claim `User.Identity.Name`, preventing client-side spoofing.
+- **Frontend Session (`AU-9`–`AU-13`)**: Accessible `/login` page with field validation and demo credentials helper. JWT stored in `localStorage` and attached via `client.ts`. Protected routes redirect unauthenticated visitors to `/login` and return them on success. Any 401 mid-session immediately clears storage and redirects to `/login`.
+  - *Trade-off*: `localStorage` survives page reloads in this SPA; in production, `HttpOnly`, `SameSite=Strict`, `Secure` cookies with anti-CSRF tokens would be preferred to mitigate XSS risks.
+
+### Task 4: Dockerise the API
+- **Multi-Stage Build (`DK-1`, DK-2`)**: `apps/api/Dockerfile` uses `mcr.microsoft.com/dotnet/sdk:10.0` for restore/build and `aspnet:10.0` runtime. Copies `.csproj`, `Directory.Build.props`, and `Directory.Packages.props` first; `dotnet restore` is cached across code changes. `.dockerignore` excludes `bin`, `obj`, `node_modules`, `.git`, `.env`, and web app.
+- **Least Privilege & Security (`DK-3`, `DK-4`)**: Runs as non-root user `USER $APP_UID` (`app`, UID 1654) on HTTP port 8080. Zero secrets baked into image; connection strings, JWT keys, and environment variables are injected at runtime via `docker-compose.yml` / `.env.example`.
+- **Orchestration & Health (`DK-5`–`DK-8`)**: `api` service maps `5080:8080`, waits for SQL Server `service_healthy`, and applies EF migrations and demo seeds on empty volumes. `GET /health` probes database reachability without authentication. React app proxies via `VITE_API_PROXY_TARGET=http://localhost:5080 npm run web`.
+- **Verification Results**:
+  - Image size: **455 MB** runtime image vs **1.3 GB** SDK image (~65% reduction).
+  - Cached restore: Rebuilding after a `.cs` change reuses `CACHED` restore layer in ~4s.
+  - Non-root: `docker compose exec api whoami` prints `app` (`uid=1654`).
+- **Production Migration Strategy**: In development, `MigrateAndSeedAsync()` runs at startup. In production, migrations must run outside the API process (via CI/CD idempotent scripts `dotnet ef migrations script --idempotent` or a Kubernetes initContainer / Migration Bundle) to prevent concurrency race conditions across autoscaled replicas and adhere to least-privilege principles (runtime service account needs DML only, not DDL).
+
+### Testing Strategy (Automated & Manual Verification)
+- **Automated Test Coverage (139 Tests Passing)**:
+  - `dotnet test` (110 tests): 106 unit tests (SLA windows, tier halving with 1h floor, specialist selection, deterministic tie-breakers, 409 rejections, boundary checks) and 4 Clean Architecture layer enforcement tests.
+  - Vitest (29 tests): Covers `DEFECT-117` regression, search debouncing, accessible `SlaIndicator` rendering across all states, `EscalationPanel` validation and 409 conflict handling, and `ProtectedRoute` redirection.
+  - *Deliberately Not Tested*: Framework plumbing (built-in routing, EF internal SQL execution) and live SQL Server integration during unit runs (SQLite in-memory test doubles and Moq used for deterministic speed).
+- **Manual End-to-End Verification Across All Tasks**:
+  - Verified `DEFECT-117` and server-side filtering via browser DevTools Network tab and EF Core console SQL logs.
+  - Raised tickets verifying automatic triage (priority forcing, halved SLA, specialist assignment) and tested detail page escalation with 409 conflict handling.
+  - Verified `/reports` aggregation dashboard and grouping toggles.
+  - Tested `/login`, invalid credential rejection, inactive agent rejection, route guarding, and logout.
+  - Executed `docker compose down -v && docker compose up --build`, verifying `/health`, non-root execution (`app`), and frontend proxying.
+
+### AI Usage Account
+- **Tools Used**: Google Antigravity / Gemini 3.8 Flash for boilerplate CQRS scaffolding, edge-case unit test generation, EF Core SQL expression translation, and Docker layer caching.
+- **Workflow (Requirements-Led TDD)**: After analyzing the assignment requirements, we specifically formulated and provided the precise domain rules, business constraints (`BR-1`–`BR-8`), and edge-case boundary scenarios (such as the 1-hour floor for halved windows and deterministic ID tie-breaks), directing the AI to generate failing xUnit test suites *before* implementing domain logic.
+- **Accepted As-Is**: PBKDF2 password hasher with constant-time equality check; multi-stage Dockerfile layer restore caching.
+- **Changed / Rejected**: Rejected in-memory SLA filtering in favor of pure SQL expression trees in `TicketFilters.cs` to satisfy `FL-5`; corrected triage DTO property name to `slaReason`; removed ambiguous DI constructor on `SlaPolicy`.
+- **Bugs AI Helped Find / Introduced**: Helped isolate entangled filter state in `useTicketList.ts`; caught non-composite index on `TicketEscalations` and replaced it with composite descending index.
+- **Verification**: All AI-assisted code was validated via 139 passing automated tests, `tsc -b --noEmit`, ESLint, SQL console inspection, and clean-volume Docker boots.
 
 ### Known Limitations (Out of Scope)
-As specified in `ASSIGNMENT_CANDIDATE.md` (Section 3.4), the following features were deliberately not built:
-- User registration / self-service sign up
-- Password reset / "forgot password"
-- Email verification
-- OAuth / SSO / External identity providers
-- Refresh tokens and rotating sessions
-- Multi-factor authentication (MFA)
-- Account lockout / IP rate limiting
-- Complex role-permission matrices
-
----
-
-## Task 4: Dockerise the API Documentation
-
-### Overview & Architecture
-Task 4 packages the .NET 10 API into an immutable, multi-stage Docker container (`apps/api/Dockerfile`) orchestratable alongside SQL Server via `docker-compose.yml`.
-
-### Key Design & Implementation Decisions
-
-1. **Multi-Stage Build & Layer Caching (`DK-1`)**:
-   - **Build Stage**: Uses `mcr.microsoft.com/dotnet/sdk:10.0`. To maximize Docker layer cache hits, `global.json`, `Directory.Build.props`, `Directory.Packages.props`, and the 4 `.csproj` files (`Domain`, `Application`, `Infrastructure`, `Presentation`) are copied first.
-   - `dotnet restore apps/api/src/SupportDesk.Presentation/SupportDesk.Presentation.csproj` is executed in its own layer. Subsequent source code changes (`COPY apps/api/src/ apps/api/src/`) invalidate only the compilation and publish layers, reusing the cached restore layer (`CACHED`).
-   - Published with `-c Release -o /app/publish --no-restore`.
-2. **Context & Ignore Hygiene (`DK-2`)**:
-   - Built from repository root as context (`build: context: . dockerfile: apps/api/Dockerfile`).
-   - `.dockerignore` excludes `bin/`, `obj/`, `node_modules/`, `.git/`, `.env`, and `apps/web/` so no host artifacts or secrets enter the build context.
-3. **Least Privilege Non-Root Execution (`DK-3`)**:
-   - The runtime stage uses `mcr.microsoft.com/dotnet/aspnet:10.0` and switches to the built-in non-root user `USER $APP_UID` (UID `1654`, user `app`).
-   - Listens on unprivileged HTTP port 8080 (`ASPNETCORE_HTTP_PORTS=8080`, `EXPOSE 8080`).
-   - No certificates are baked into the image; TLS is terminated at a reverse proxy/ingress in front of the container in production.
-4. **Zero Baked Secrets & Runtime Configuration (`DK-4`)**:
-   - No connection strings, JWT keys, or credentials exist in the image or Dockerfile.
-   - All configuration is injected via container environment variables in `docker-compose.yml`:
-     - `ConnectionStrings__Default`
-     - `Jwt__Key`
-     - `ASPNETCORE_ENVIRONMENT=Development`
-5. **Orchestration & Health Dependencies (`DK-5`)**:
-   - In `docker-compose.yml`, the `api` service exposes `5080:8080` (accessible at `http://localhost:5080`).
-   - Connects to SQL Server via its Docker service name `sqlserver` on port 1433 (`Server=sqlserver,1433`).
-   - Starts only after SQL Server passes its health check (`depends_on: sqlserver: condition: service_healthy`).
-6. **Central Health Check Endpoint (`DK-7`)**:
-   - Implemented `DatabaseHealthCheck` in `SupportDesk.Presentation.Health`, verifying DB reachability via `SupportDbContext.Database.CanConnectAsync()`.
-   - Exposed at `GET /health` with `app.MapHealthChecks("/health").AllowAnonymous();`.
-   - Centrally configured as an exception to the Task 3 `FallbackPolicy`, responding `200 OK` ("Healthy") without requiring a JWT token.
-7. **Frontend Proxy Integration (`DK-8`)**:
-   - The React frontend dev server can proxy to the containerized API via:
-     ```bash
-     VITE_API_PROXY_TARGET=http://localhost:5080 npm run web
-     ```
-
-### Verification Results (per Section 4.2)
-
-- **Clean Volume Startup (`DK-6`)**:
-  - Ran `docker compose down -v && docker compose up --build -d`.
-  - SQL Server started, became healthy, and the API container applied all EF Core migrations and seeded 40 tickets, 6 customers, 5 categories, and 6 agents on an empty volume.
-  - `GET http://localhost:5080/health` returns `200 OK` (`Healthy`).
-  - `POST http://localhost:5080/api/auth/login` and `GET http://localhost:5080/api/tickets` return the 40 seeded tickets with JWT authentication.
-- **Restore Layer Caching**:
-  - Modifying a `.cs` file and rebuilding (`docker compose build api`) reuses the cached restore layer (`RUN dotnet restore ... CACHED`), rebuilding in ~4 seconds.
-- **Image Size Comparison**:
-  - SDK image (`mcr.microsoft.com/dotnet/sdk:10.0`): **1.3 GB**
-  - Runtime base image (`mcr.microsoft.com/dotnet/aspnet:10.0`): **340 MB**
-  - Published API image (`northwind-support-api:latest`): **455 MB**
-  - **Savings**: ~845 MB reduction (65% smaller than the SDK image).
-- **Non-Root Execution**:
-  - `docker compose exec api whoami` prints `app`.
-  - `docker compose exec api id` prints `uid=1654(app) gid=1654(app) groups=1654(app)`.
-
-### Production Database Migration Strategy
-
-In local development, the API applies EF Core migrations and demo seeds at startup via `await app.MigrateAndSeedAsync()` when `ASPNETCORE_ENVIRONMENT=Development`. 
-
-**Why this is NOT done in production:**
-1. **Concurrency & Race Conditions**: In production environments with multiple API replicas (e.g. horizontally autoscaled pods in Kubernetes or ECS tasks), replicas starting concurrently will race to apply migrations simultaneously, leading to lock contention, migration failures, or corrupted migration history tables.
-2. **Principle of Least Privilege**: Running migrations on application startup requires the API runtime connection string to possess DDL privileges (`CREATE TABLE`, `ALTER TABLE`, `DROP INDEX`). In production, the running API should only have DML permissions (`SELECT`, `INSERT`, `UPDATE`, `DELETE`).
-3. **Deployment Safety & Zero-Downtime Rollouts**: If a migration fails during application startup, container instances crash-loop, disrupting existing traffic.
-
-**Production Recommendation:**
-- **CI/CD Pipeline Deployment**: Generate idempotent SQL migration scripts at build time via `dotnet ef migrations script --idempotent` and apply them in a controlled deployment pipeline with DBA review and rollback plans.
-- **Migration InitContainer / Bundle**: If automated during deployment, run a single-instance Kubernetes Job or `initContainer` using an EF Core Migration Bundle (`dotnet ef migrations bundle`) that executes with elevated DDL privileges, verifies success, and terminates before live API replicas are rolled out.
-
-### Known Limitations (Out of Scope)
-As specified in `ASSIGNMENT_CANDIDATE.md` (Section 4.3):
-- Kubernetes manifests / Helm charts
-- Image pushing to external container registries (e.g., ACR / ECR)
-- CI/CD container pipeline configuration
-- In-container HTTPS / TLS certificates (terminated at edge/reverse proxy)
-- Dockerising the React web application
-- Docker secrets / secret vaults (Vault, AWS Secrets Manager)
-- Multi-architecture container builds (ARM64 cross-compilation)
+As permitted by specification: No user self-registration, password reset, OAuth/SSO, refresh tokens, MFA, or complex role matrices. In production, JWT storage would transition from `localStorage` to `HttpOnly`, `SameSite=Strict` cookies with anti-CSRF protection, and migrations would run via CI/CD release pipelines.
