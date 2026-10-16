@@ -64,9 +64,9 @@ export function CreateTicketPage() {
                 {created.triage ? `${created.triage.slaWindowHours}h` : 'Calculated'} (Due{' '}
                 {formatDateTime(created.dueAtUtc)})
               </span>
-              {created.triage?.slaCalculationReason && (
+              {(created.triage?.slaReason ?? created.triage?.slaCalculationReason) && (
                 <p className="summary__note" style={{ margin: '2px 0 0' }}>
-                  {created.triage.slaCalculationReason}
+                  {created.triage?.slaReason ?? created.triage?.slaCalculationReason}
                 </p>
               )}
             </div>

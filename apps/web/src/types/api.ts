@@ -52,7 +52,8 @@ export interface TicketTriage {
   appliedPriority: TicketPriority;
   priorityReason: string;
   slaWindowHours: number;
-  slaCalculationReason: string;
+  slaReason?: string;
+  slaCalculationReason?: string;
   assignedAgentId: number | null;
   assignmentReason: string;
 }
